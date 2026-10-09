@@ -16,6 +16,7 @@
 #include "audio_decoder.h"
 #include "audio_output.h"
 #include "log_sink.h"
+#include "software_dsp.h"
 #include "timeline_buffer.h"
 
 /*
@@ -48,10 +49,27 @@ struct CodecFormat {
 
 struct AudioEngine {
     AudioEngine(std::shared_ptr<LogSink> log, int sampleRate, int channels)
-        : mLog(std::move(log)), mSampleRate(sampleRate), mChannels(channels) {
+        : mLog(std::move(log)), mSampleRate(sampleRate), mChannels(channels),
+          mDsp(std::make_shared<SoftwareDsp>(sampleRate)) {
         mQueued[ctIndex(CT_ALAC)].store(CodecFormat{352}, std::memory_order_relaxed);
         mQueued[ctIndex(CT_AAC_LC)].store(CodecFormat{1024}, std::memory_order_relaxed);
         mQueued[ctIndex(CT_AAC_ELD)].store(CodecFormat{480}, std::memory_order_relaxed);
+    }
+
+    void setEqualizerBandGain(int band, float gainDb) {
+        if (mDsp) mDsp->setBandGain(band, gainDb);
+    }
+
+    float getEqualizerBandGain(int band) const {
+        return mDsp ? mDsp->getBandGain(band) : 0.0f;
+    }
+
+    void resetEqualizer() {
+        if (mDsp) mDsp->resetGains();
+    }
+
+    void getVisualizerBands(float *outBands) {
+        if (mDsp) mDsp->getVisualizerBands(outBands);
     }
 
     ~AudioEngine() {
@@ -99,6 +117,14 @@ struct AudioEngine {
         const int i = ctIndex(ct);
         if (i < 0 || spf <= 0) return;
         mQueued[i].store(CodecFormat{spf}, std::memory_order_release);
+    }
+
+    int32_t getSessionId() {
+        std::unique_lock<std::mutex> lk(mRebuildLock, std::try_to_lock);
+        if (lk.owns_lock() && mOutput) {
+            return mOutput->getSessionId();
+        }
+        return 0;
     }
 
     bool copyDebug(void *dst, size_t dstLen) {
@@ -165,7 +191,7 @@ private:
         mTimeline = std::make_shared<TimelineBuffer>(mSampleRate, mChannels,
                                                      cfg.staticCushionMs, cfg.percentilePct);
         mOutput = AudioOutput::create(mSampleRate, mChannels, cfg.oboeBufferFrames,
-                                      cfg.lowLatency, mTimeline, mLog);
+                                      cfg.lowLatency, mTimeline, mLog, mDsp);
         mApplied = std::make_unique<AudioConfig>(cfg);
     }
 
@@ -173,6 +199,7 @@ private:
     const int mChannels;
     std::unique_ptr<AudioConfig> mApplied;
     std::shared_ptr<LogSink> mLog;
+    std::shared_ptr<SoftwareDsp> mDsp;
 
     // thread safety: decode thread reads mTimeline/mOutput unguarded (nothing else writes them outside teardown) and writes them under mRebuildLock
     // all other threads read them under mRebuildLock; mDecoder is decode-thread-only
@@ -245,6 +272,27 @@ void audio_engine_pause(AudioEngine *engine) {
 bool audio_engine_get_debug(AudioEngine *engine, void *dst, size_t dstLen) {
     if (!engine || !dst) return false;
     return engine->copyDebug(dst, dstLen);
+}
+
+int32_t audio_engine_get_session_id(AudioEngine *engine) {
+    if (!engine) return 0;
+    return engine->getSessionId();
+}
+
+void audio_engine_set_equalizer_band_gain(AudioEngine *engine, int band, float gainDb) {
+    if (engine) engine->setEqualizerBandGain(band, gainDb);
+}
+
+float audio_engine_get_equalizer_band_gain(AudioEngine *engine, int band) {
+    return engine ? engine->getEqualizerBandGain(band) : 0.0f;
+}
+
+void audio_engine_reset_equalizer(AudioEngine *engine) {
+    if (engine) engine->resetEqualizer();
+}
+
+void audio_engine_get_visualizer_bands(AudioEngine *engine, float *outBands) {
+    if (engine) engine->getVisualizerBands(outBands);
 }
 
 void audio_engine_destroy(AudioEngine *engine) {

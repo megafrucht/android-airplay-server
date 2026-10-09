@@ -39,6 +39,15 @@ void audio_engine_pause(AudioEngine *engine);
 /* refresh + copy packed debug struct into dst; false if engine NULL or dstLen too small */
 bool audio_engine_get_debug(AudioEngine *engine, void *dst, size_t dstLen);
 
+/* get current audio session id; returns 0 if not supported or not running */
+int32_t audio_engine_get_session_id(AudioEngine *engine);
+
+/* Software-DSP 5-Band Equalizer & Visualizer */
+void audio_engine_set_equalizer_band_gain(AudioEngine *engine, int band, float gainDb);
+float audio_engine_get_equalizer_band_gain(AudioEngine *engine, int band);
+void audio_engine_reset_equalizer(AudioEngine *engine);
+void audio_engine_get_visualizer_bands(AudioEngine *engine, float *outBands);
+
 /* stop + destroy engine; no concurrent or later audio_engine_decode calls allowed */
 void audio_engine_destroy(AudioEngine *engine);
 

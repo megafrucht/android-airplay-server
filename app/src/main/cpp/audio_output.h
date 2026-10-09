@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include "log_sink.h"
+#include "software_dsp.h"
 #include "timeline_buffer.h"
 
 class AudioOutput;
@@ -22,12 +23,16 @@ class AudioOutput;
 class OboeCallbacks : public oboe::AudioStreamDataCallback,
                       public oboe::AudioStreamErrorCallback {
 public:
-    OboeCallbacks(std::shared_ptr<TimelineBuffer> timeline, std::shared_ptr<LogSink> log)
-        : mTimeline(std::move(timeline)), mLog(std::move(log)) {}
+    OboeCallbacks(std::shared_ptr<TimelineBuffer> timeline, std::shared_ptr<LogSink> log,
+                  std::shared_ptr<SoftwareDsp> dsp)
+        : mTimeline(std::move(timeline)), mLog(std::move(log)), mDsp(std::move(dsp)) {}
 
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *, void *audioData,
                                           int32_t numFrames) override {
         mTimeline->read(static_cast<int16_t *>(audioData), numFrames);
+        if (mDsp) {
+            mDsp->process(static_cast<int16_t *>(audioData), numFrames, 2);
+        }
         return oboe::DataCallbackResult::Continue;
     }
 
@@ -38,6 +43,7 @@ private:
 
     std::shared_ptr<TimelineBuffer> mTimeline;
     std::shared_ptr<LogSink> mLog;
+    std::shared_ptr<SoftwareDsp> mDsp;
     std::weak_ptr<AudioOutput> mOwner;
 };
 
@@ -50,18 +56,22 @@ public:
     static std::shared_ptr<AudioOutput> create(int sampleRate, int channels, int oboeBufferFrames,
                                                bool lowLatency,
                                                std::shared_ptr<TimelineBuffer> timeline,
-                                               std::shared_ptr<LogSink> log) {
+                                               std::shared_ptr<LogSink> log,
+                                               std::shared_ptr<SoftwareDsp> dsp) {
         auto out = std::make_shared<AudioOutput>(sampleRate, channels, oboeBufferFrames,
-                                                 lowLatency, std::move(timeline), std::move(log));
+                                                 lowLatency, std::move(timeline), std::move(log),
+                                                 std::move(dsp));
         out->mCallbacks->mOwner = out;
         return out;
     }
 
     AudioOutput(int sampleRate, int channels, int oboeBufferFrames, bool lowLatency,
-                std::shared_ptr<TimelineBuffer> timeline, std::shared_ptr<LogSink> log)
+                std::shared_ptr<TimelineBuffer> timeline, std::shared_ptr<LogSink> log,
+                std::shared_ptr<SoftwareDsp> dsp)
         : mSampleRate(sampleRate), mChannels(channels), mOboeBufferFrames(oboeBufferFrames),
           mLowLatency(lowLatency), mTimeline(std::move(timeline)), mLog(std::move(log)),
-          mCallbacks(std::make_shared<OboeCallbacks>(mTimeline, mLog)) {}
+          mDsp(std::move(dsp)),
+          mCallbacks(std::make_shared<OboeCallbacks>(mTimeline, mLog, mDsp)) {}
 
     ~AudioOutput() { stop(); }
 
@@ -100,6 +110,18 @@ public:
         return Debug{mLastXrun};
     }
 
+    int32_t getSessionId() const {
+        if (mStream) {
+            auto sid = mStream->getSessionId();
+            if (sid != oboe::SessionId::None && sid != oboe::SessionId::Allocate) {
+                return static_cast<int32_t>(sid);
+            }
+        }
+        return 0;
+    }
+
+    std::shared_ptr<SoftwareDsp> getDsp() const { return mDsp; }
+
 private:
     friend class OboeCallbacks;
 
@@ -122,6 +144,7 @@ private:
             ->setSampleRate(mSampleRate)
             ->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Medium)
             ->setContentType(oboe::ContentType::Music)
+            ->setSessionId(oboe::SessionId::Allocate)
             ->setDataCallback(mCallbacks)
             ->setErrorCallback(mCallbacks);
         if (mLowLatency) {
@@ -167,6 +190,7 @@ private:
 
     std::shared_ptr<TimelineBuffer> mTimeline;
     std::shared_ptr<LogSink> mLog;
+    std::shared_ptr<SoftwareDsp> mDsp;
     std::atomic<bool> mClosing{false};
     std::shared_ptr<OboeCallbacks> mCallbacks;
     std::shared_ptr<oboe::AudioStream> mStream;

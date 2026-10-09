@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import io.github.jqssun.airplay.Prefs
+import io.github.jqssun.airplay.audio.AirPlayEqualizerManager
 import io.github.jqssun.airplay.audio.TrackInfo
 import io.github.jqssun.airplay.service.AirPlayService
 import io.github.jqssun.airplay.service.AirPlayService.ServerState
@@ -88,6 +89,52 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
     }
     fun audioScanEnd() { service?.dacpController?.playResume() }
     fun audioMuteToggle() { service?.dacpController?.muteToggle() }
+
+    val equalizerManager: AirPlayEqualizerManager? get() = service?.equalizerManager
+
+    private val _audioSessionId = MutableStateFlow(0)
+    val audioSessionId: StateFlow<Int> = _audioSessionId.asStateFlow()
+
+    private val _bandLevels = MutableStateFlow<List<Short>>(listOf(0, 0, 0, 0, 0))
+    val bandLevels: StateFlow<List<Short>> = _bandLevels.asStateFlow()
+
+    private val _bandNames = MutableStateFlow<List<String>>(listOf("60 Hz", "230 Hz", "910 Hz", "4 kHz", "14 kHz"))
+    val bandNames: StateFlow<List<String>> = _bandNames.asStateFlow()
+
+    private val _bandFrequencies = MutableStateFlow<List<Int>>(listOf(60, 230, 910, 4000, 14000))
+    val bandFrequencies: StateFlow<List<Int>> = _bandFrequencies.asStateFlow()
+
+    private val _isEqualizerAvailable = MutableStateFlow(false)
+    val isEqualizerAvailable: StateFlow<Boolean> = _isEqualizerAvailable.asStateFlow()
+
+    fun setEqualizerBandLevel(band: Short, levelMb: Short) {
+        val cur = _bandLevels.value.toMutableList()
+        val idx = band.toInt()
+        if (idx in cur.indices) {
+            cur[idx] = levelMb
+            _bandLevels.value = cur
+        }
+        service?.equalizerManager?.setBandLevel(band, levelMb)
+    }
+
+    fun adjustEqualizerBandLevelDb(band: Short, deltaDb: Int) {
+        val cur = _bandLevels.value.getOrElse(band.toInt()) { 0 }
+        val target = (cur + deltaDb * 100).toShort().coerceIn(-1500, 1500)
+        setEqualizerBandLevel(band, target)
+    }
+
+    fun resetEqualizerFlat() {
+        _bandLevels.value = listOf(0, 0, 0, 0, 0)
+        service?.equalizerManager?.resetFlat()
+    }
+
+    fun getVisualizerBands(outBands: FloatArray): Boolean {
+        return service?.getVisualizerBands(outBands) ?: false
+    }
+
+    fun onRecordAudioPermissionGranted() {
+        service?.initAudioEffects()
+    }
 
     private val _serverState = MutableStateFlow(ServerState.STOPPED)
     val serverState: StateFlow<ServerState> = _serverState.asStateFlow()
@@ -595,6 +642,11 @@ class MainViewModel @Inject constructor(app: Application) : AndroidViewModel(app
             }
             _mirroringActive.value = it.mirroringActive.value
             _trackInfo.value = it.trackInfo.value
+            _audioSessionId.value = it.audioSessionId.value
+            _bandLevels.value = it.equalizerManager.bandLevels.value
+            _bandNames.value = it.equalizerManager.bandNames.value
+            _bandFrequencies.value = it.equalizerManager.bandFrequencies.value
+            _isEqualizerAvailable.value = it.equalizerManager.isAvailable.value
             if (_debugEnabled.value) {
                 _debugInfo.value = it.collectDebugInfo()
             }

@@ -35,6 +35,7 @@ import io.github.jqssun.airplay.MainActivity
 import io.github.jqssun.airplay.Prefs
 import io.github.jqssun.airplay.R
 import io.github.jqssun.airplay.realDisplaySize
+import io.github.jqssun.airplay.audio.AirPlayEqualizerManager
 import io.github.jqssun.airplay.audio.DacpController
 import io.github.jqssun.airplay.audio.DacpPlayer
 import io.github.jqssun.airplay.audio.DmapParser
@@ -77,6 +78,9 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     val videoRenderer = VideoRenderer(this)
     val audioRenderer = AudioRenderer()
+    val equalizerManager by lazy { AirPlayEqualizerManager(this) }
+    private val _audioSessionId = MutableStateFlow(0)
+    val audioSessionId = _audioSessionId.asStateFlow()
     private val audioManager by lazy { getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val airPlayVideoPlayer by lazy { AirPlayVideoPlayer(this) }
     val videoDownloader by lazy { VideoDownloader(this) }
@@ -327,7 +331,10 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
                 .debounce(AUDIO_CONFIG_DEBOUNCE_MS)
                 .collect { audioRenderer.updateConfig(it) }
         }
+        equalizerManager.attachRenderer(audioRenderer)
     }
+
+    fun getVisualizerBands(outBands: FloatArray): Boolean = audioRenderer.getVisualizerBands(outBands)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_START_SERVER) {
@@ -593,12 +600,21 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         dacpController = null
         mediaSession?.release()
         mediaSession = null
+        equalizerManager.release()
         super.onDestroy()
+    }
+
+    fun initAudioEffects() {
+        val sid = audioRenderer.getSessionId()
+        _audioSessionId.value = sid
+        equalizerManager.init(sid)
     }
 
     // RaopCallbackHandler (called from native threads)
 
     override fun onVideoData(data: ByteArray, ntpTimeNs: Long, isH265: Boolean) {
+        // Suppress video decoding during pure music/audio (RAOP) streaming to reserve CPU for EQ & Visualizer
+        if (_audioOnly.value) return
         videoRenderer.feedFrame(data, ntpTimeNs, isH265)
     }
 
@@ -635,12 +651,21 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
         clearPin()
         audioRenderer.start()
         audioRenderer.setFormat(ct, spf)
-        if (!usingScreen) _setPlaying(true)
-        if (!usingScreen && !_audioOnly.value) {
-            // pure music streaming (not screen mirroring audio)
-            _setAudioOnly(true)
+
+        // Initialize hardware DSP Equalizer with session ID from native audio stream
+        val sid = audioRenderer.getSessionId()
+        _audioSessionId.value = sid
+        equalizerManager.init(sid)
+
+        if (!usingScreen) {
+            _setPlaying(true)
+            if (!_audioOnly.value) {
+                // pure music streaming (not screen mirroring audio)
+                _setAudioOnly(true)
+                videoRenderer.stopSession() // Mute/stop video decoder for pure music signal
+            }
         }
-        log("Audio format: ct=$ct spf=$spf screen=$usingScreen")
+        log("Audio format: ct=$ct spf=$spf screen=$usingScreen session=$sid")
     }
 
     override fun onVideoSize(srcW: Float, srcH: Float, w: Float, h: Float) {
@@ -649,6 +674,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             _videoAspect.value = w / h
             _videoResolution.value = "${w.toInt()}x${h.toInt()}"
             videoRenderer.setResolution(w.toInt(), h.toInt())
+            videoRenderer.startSession()
             _mirroringActive.value = true
         }
         log("Video size: ${srcW}x${srcH} -> ${w}x${h}")
@@ -729,6 +755,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
             _endVideoPlayback("AirPlay Video stopped (disconnect)")
             // last client gone: release audio output devices to save power
             audioRenderer.stop()
+            equalizerManager.release()
             _audioOnly.value = false
             _lastVideoPollAt = 0
             _videoPollSuppressed = false
@@ -799,6 +826,7 @@ class AirPlayService : LifecycleService(), RaopCallbackHandler, LogListener {
 
     override fun onAudioTeardown() {
         _setPlaying(false)
+        equalizerManager.release()
     }
 
     override fun onDacpId(dacpId: String, activeRemote: String) {

@@ -501,6 +501,7 @@ fun MainScreen(
         if (pin != null) fullscreen = false
     }
 
+    val showEqualizerFullscreen = audioOnly && connections > 0 && tab == Tab.OVERVIEW
     if (fullscreen) {
         BackHandler { fullscreen = false }
         FullscreenVideo(
@@ -508,6 +509,11 @@ fun MainScreen(
             video = video,
             onExitFullscreen = { fullscreen = false },
             onPip = onPip
+        )
+    } else if (showEqualizerFullscreen) {
+        BackHandler { tab = Tab.SETTINGS }
+        FireTvAirPlayScreen(
+            viewModel = viewModel
         )
     } else {
         Scaffold(
@@ -618,7 +624,7 @@ private fun OverviewContent(
             val connecting = state == ServerState.RUNNING && connections > 0 &&
                 !mirroringActive && !videoPlaybackActive
             if (showAudioMode && state == ServerState.RUNNING && connections > 0) {
-                NowPlayingContent(viewModel)
+                FireTvAirPlayScreen(viewModel)
             } else {
                 if (state == ServerState.RUNNING && (mirroringActive || idlePreview)) {
                     video()

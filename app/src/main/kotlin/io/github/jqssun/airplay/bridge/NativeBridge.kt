@@ -42,6 +42,13 @@ object NativeBridge {
     external fun nativeServerAudioStart(handle: Long): Boolean
     external fun nativeServerAudioStop(handle: Long)
     external fun nativeServerAudioFormat(handle: Long, ct: Int, spf: Int)
+    external fun nativeServerAudioGetSessionId(handle: Long): Int
     // fills direct buffer with packed debug snapshot; false if audio isn't running
     external fun nativeServerAudioDebug(handle: Long, buf: java.nio.ByteBuffer): Boolean
+
+    // In-stream Software-DSP 5-Band Equalizer & 32-Band Visualizer
+    external fun nativeSetEqualizerBandGain(handle: Long, band: Int, gainDb: Float)
+    external fun nativeGetEqualizerBandGain(handle: Long, band: Int): Float
+    external fun nativeResetEqualizer(handle: Long)
+    external fun nativeGetVisualizerBands(handle: Long, outBands: FloatArray): Boolean
 }

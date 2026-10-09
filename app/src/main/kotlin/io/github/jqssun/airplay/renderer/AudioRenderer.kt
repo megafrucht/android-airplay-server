@@ -11,11 +11,15 @@ class AudioRenderer {
     @Volatile var codecLabel = ""; private set
 
     private var serverHandle = 0L
+    private val bandGains = FloatArray(5)
 
     @Synchronized
     fun attachEngine(server: Long) {
         serverHandle = server
         pushConfig()
+        for (i in bandGains.indices) {
+            NativeBridge.nativeSetEqualizerBandGain(serverHandle, i, bandGains[i])
+        }
     }
 
     @Synchronized
@@ -37,6 +41,46 @@ class AudioRenderer {
         if (serverHandle == 0L) return
         NativeBridge.nativeServerAudioStop(serverHandle)
         codecLabel = ""
+    }
+
+    @Synchronized
+    fun getSessionId(): Int {
+        if (serverHandle == 0L) return 0
+        return NativeBridge.nativeServerAudioGetSessionId(serverHandle)
+    }
+
+    @Synchronized
+    fun setEqualizerBandGain(band: Int, gainDb: Float) {
+        if (band in bandGains.indices) {
+            bandGains[band] = gainDb
+        }
+        if (serverHandle != 0L) {
+            NativeBridge.nativeSetEqualizerBandGain(serverHandle, band, gainDb)
+        }
+    }
+
+    @Synchronized
+    fun getEqualizerBandGain(band: Int): Float {
+        if (serverHandle != 0L) {
+            return NativeBridge.nativeGetEqualizerBandGain(serverHandle, band)
+        }
+        return if (band in bandGains.indices) bandGains[band] else 0f
+    }
+
+    @Synchronized
+    fun resetEqualizer() {
+        for (i in bandGains.indices) {
+            bandGains[i] = 0f
+        }
+        if (serverHandle != 0L) {
+            NativeBridge.nativeResetEqualizer(serverHandle)
+        }
+    }
+
+    @Synchronized
+    fun getVisualizerBands(outBands: FloatArray): Boolean {
+        if (serverHandle == 0L) return false
+        return NativeBridge.nativeGetVisualizerBands(serverHandle, outBands)
     }
 
     @Synchronized

@@ -420,3 +420,58 @@ Java_io_github_jqssun_airplay_bridge_NativeBridge_nativeServerAudioDebug(
     if (!addr || cap <= 0) return JNI_FALSE;
     return audio_engine_get_debug(ctx->cb_ctx.audio_engine, addr, (size_t)cap) ? JNI_TRUE : JNI_FALSE;
 }
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_io_github_jqssun_airplay_bridge_NativeBridge_nativeServerAudioGetSessionId(
+        JNIEnv *env, jobject thiz, jlong handle) {
+    server_ctx_t *ctx = (server_ctx_t *)(intptr_t)handle;
+    if (!ctx || !ctx->cb_ctx.audio_engine) return 0;
+    return (jint)audio_engine_get_session_id(ctx->cb_ctx.audio_engine);
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_io_github_jqssun_airplay_bridge_NativeBridge_nativeSetEqualizerBandGain(
+        JNIEnv *env, jobject thiz, jlong handle, jint band, jfloat gainDb) {
+    server_ctx_t *ctx = (server_ctx_t *)(intptr_t)handle;
+    if (ctx && ctx->cb_ctx.audio_engine) {
+        audio_engine_set_equalizer_band_gain(ctx->cb_ctx.audio_engine, band, gainDb);
+    }
+}
+
+extern "C"
+JNIEXPORT jfloat JNICALL
+Java_io_github_jqssun_airplay_bridge_NativeBridge_nativeGetEqualizerBandGain(
+        JNIEnv *env, jobject thiz, jlong handle, jint band) {
+    server_ctx_t *ctx = (server_ctx_t *)(intptr_t)handle;
+    if (ctx && ctx->cb_ctx.audio_engine) {
+        return audio_engine_get_equalizer_band_gain(ctx->cb_ctx.audio_engine, band);
+    }
+    return 0.0f;
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_io_github_jqssun_airplay_bridge_NativeBridge_nativeResetEqualizer(
+        JNIEnv *env, jobject thiz, jlong handle) {
+    server_ctx_t *ctx = (server_ctx_t *)(intptr_t)handle;
+    if (ctx && ctx->cb_ctx.audio_engine) {
+        audio_engine_reset_equalizer(ctx->cb_ctx.audio_engine);
+    }
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_io_github_jqssun_airplay_bridge_NativeBridge_nativeGetVisualizerBands(
+        JNIEnv *env, jobject thiz, jlong handle, jfloatArray outBands) {
+    server_ctx_t *ctx = (server_ctx_t *)(intptr_t)handle;
+    if (!ctx || !ctx->cb_ctx.audio_engine || !outBands) return JNI_FALSE;
+    jsize len = env->GetArrayLength(outBands);
+    if (len < 32) return JNI_FALSE;
+    float bands[32];
+    audio_engine_get_visualizer_bands(ctx->cb_ctx.audio_engine, bands);
+    env->SetFloatArrayRegion(outBands, 0, 32, bands);
+    return JNI_TRUE;
+}
+

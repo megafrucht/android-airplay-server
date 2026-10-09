@@ -23,6 +23,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.jqssun.airplay.service.AirPlayService
+import io.github.jqssun.airplay.ui.FireTvAirPlayScreen
 import io.github.jqssun.airplay.ui.MainScreen
 import io.github.jqssun.airplay.ui.theme.AirPlayTheme
 import io.github.jqssun.airplay.viewmodel.MainViewModel
@@ -65,6 +66,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Keep screen on permanently on Fire TV Stick to prevent screensaver / sleep
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -81,39 +85,12 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(viewModel.keepScreenOn, viewModel.connectionCount) { keep, conns ->
-                    keep && conns > 0
-                }.collect { on ->
-                    if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                }
-            }
-        }
-
-        // auto-enter pre-declared in pip params
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            lifecycleScope.launch {
-                repeatOnLifecycle(Lifecycle.State.STARTED) {
-                    combine(
-                        viewModel.serverState, viewModel.connectionCount,
-                        viewModel.videoPlaybackActive, viewModel.videoPlaybackAspect,
-                        viewModel.videoAspect
-                    ) { _, _, _, _, _ -> }.collect { setPictureInPictureParams(_pipParams()) }
-                }
-            }
-        }
+        // Ensure screen remains permanently ON on Fire TV Stick (no screensaver / sleep)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         setContent {
             AirPlayTheme {
-                MainScreen(
-                    viewModel = viewModel,
-                    isInPip = isInPip.value,
-                    onSurfaceAvailable = { viewModel.onSurfaceAvailable(it) },
-                    onSurfaceDestroyed = { viewModel.onSurfaceDestroyed(it) },
-                    onPip = { enterPip() }
-                )
+                FireTvAirPlayScreen(viewModel = viewModel)
             }
         }
     }
